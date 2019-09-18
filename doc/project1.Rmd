@@ -1,0 +1,569 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Data Story on song lyrics
+
+Music is a great tool to tell story and express feelings we can¡¯t grasp. And music in different genres tend to convey emotion in different ways. Although the genres classifications may be subjective and even overlap, there are still some shared characteristics represented in lyrics through genre breakdown.
+
+```{r,warning=FALSE,error=FALSE,echo=FALSE,message=FALSE}
+# set path for data file
+setwd("/Users/lynne/Documents/GitHub/fall2019-proj1--yanling911/Output")
+```
+![](../figs/title.png) 
+
+```{r,warning=FALSE,error=FALSE,echo=FALSE,message=FALSE}
+## install and load libraries
+library(tm)
+library(tidytext)
+library(tidyverse)
+library(DT)
+library(wordcloud)
+library(scales)
+library(gridExtra)
+library(ngram)
+library(igraph)
+library(ggraph)
+library(rsconnect)
+library(plotly)
+library(data.table)
+library(wordcloud2)
+library(grid)
+library(shiny) 
+library(ggplot2)
+library(sentimentr)
+library(syuzhet)
+library(tibble)
+```
+
+```{r load data, message=FALSE,echo=FALSE}
+# load lyrics data
+lyrics <- load('../Output/processed_lyrics.RData') 
+# load artist information
+dt_artist <- fread('../Output/artists.csv') 
+```
+
+```{r,warning=FALSE,error=FALSE,echo=FALSE,message=FALSE}
+# Combine both the data sets and keep the required columns for analysis
+names(dt_artist) <- c("artist","intro","formed","members","origin")
+
+lyrics <- dt_lyrics %>%
+  inner_join(dt_artist, by = "artist") %>%
+  mutate(count = sapply(dt_lyrics$stemmedwords, wordcount))%>%
+  mutate(age = ifelse(dt_lyrics$year < 1980&dt_lyrics$year>1969,"age1970s" ,
+                       ifelse(dt_lyrics$year < 1990&dt_lyrics$year>1979,"age1980s",ifelse(dt_lyrics$year < 2000&dt_lyrics$year>1989,"age1990s",ifelse(dt_lyrics$year < 2010&dt_lyrics$year>1999,"age2000s",ifelse(dt_lyrics$year < 2020&dt_lyrics$year>2009,"age2010s","else"))))))%>%
+  mutate(stage = ifelse(dt_lyrics$year < 2010,"before2010","after2010"))%>%
+  filter(genre %in% c("Folk", "R&B", "Electronic", "Jazz", "Indie", "Country", "Rock", "Metal", "Pop", "Hip-Hop", "Other"))%>%
+  filter(age %in% c("age1970s", "age1980s", "age1990s", "age2000s", "age2010s"))
+
+corpus <- VCorpus(VectorSource(lyrics$stemmedwords))
+word_tibble <- tidy(corpus) %>%
+  select(text) %>%
+  mutate(id = row_number()) %>%
+  unnest_tokens(word, text)
+```
+
+### the distribution of each genres
+```{r, warning=FALSE, message=FALSE,echo=FALSE}
+table<-table(lyrics$genre,lyrics$age)
+addmargins(table)
+```
+According to the list, we can see the popularity of different music genres in different phases. Musicians have long-term preferences on Rock music, Pop music, and Country music, besides, Mental and Hip-hop have led a trend after 2000. folk music and Indie music seems to be the niche genre with the fewest audience.
+
+```{r, warning=FALSE, message=FALSE,echo=FALSE}
+lyrics_country <- lyrics[lyrics$genre=="Country",]
+bag_of_words_country <-  lyrics_country %>%
+  unnest_tokens(word, stemmedwords)
+word_count_country<- bag_of_words_country %>%
+  count(word, sort = TRUE)
+
+lyrics_hiphop <- lyrics[lyrics$genre=="Hip-Hop",]
+bag_of_words_hiphop <-  lyrics_hiphop %>%
+  unnest_tokens(word, stemmedwords)
+word_count_hiphop<- bag_of_words_hiphop %>%
+  count(word, sort = TRUE)
+
+lyrics_mental <- lyrics[lyrics$genre=="Metal",]
+bag_of_words_mental <-  lyrics_mental %>%
+  unnest_tokens(word, stemmedwords)
+word_count_mental<- bag_of_words_mental %>%
+  count(word, sort = TRUE)
+
+lyrics_pop <- lyrics[lyrics$genre=="Pop",]
+bag_of_words_pop <-  lyrics_pop %>%
+  unnest_tokens(word, stemmedwords)
+word_count_pop<- bag_of_words_pop %>%
+  count(word, sort = TRUE)
+
+lyrics_jazz <- lyrics[lyrics$genre=="Jazz",]
+bag_of_words_jazz <-  lyrics_jazz %>%
+  unnest_tokens(word, stemmedwords)
+word_count_jazz<- bag_of_words_jazz %>%
+  count(word, sort = TRUE)
+
+lyrics_rock <- lyrics[lyrics$genre=="Rock",]
+bag_of_words_rock <-  lyrics_rock %>%
+  unnest_tokens(word, stemmedwords)
+word_count_rock<- bag_of_words_rock %>%
+  count(word, sort = TRUE)
+
+lyrics_randb <- lyrics[lyrics$genre=="R&B",]
+bag_of_words_randb <-  lyrics_randb %>%
+  unnest_tokens(word, stemmedwords)
+word_count_randb<- bag_of_words_randb %>%
+  count(word, sort = TRUE)
+```
+
+### Word Analysis
+Does patterns varies in song lyrics between genres and time? I try to compare the most frequently used words in different genres to get an answer.
+I take the 6 most popular genre---Country, Hiphop, Jazz, Mental, Pop, and Rock music--- as examples, and roughly divide the time into 2 stages of before/after 2010.
+```{r, warning=FALSE, message=FALSE,echo=FALSE}
+bag_of_words <-  lyrics %>%
+  unnest_tokens(word, stemmedwords)
+temp <- bag_of_words %>%
+      count(stage, word) %>%
+      group_by(stage) %>%
+      mutate(proportion = n / sum(n)) %>% 
+      select(-n) %>% 
+      spread(stage, proportion)
+ggplot(temp, 
+             aes_string(x = colnames(temp)[2], y = colnames(temp)[3]),
+             color = abs(colnames(temp)[3] - colnames(temp)[2])) +
+      geom_abline(color = "gray40", lty = 2) +
+      geom_jitter(alpha = 0.1, size = 1, width = 0.3, height = 0.3) +
+      geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+      labs(title="Words Proportion before/after 2010")+
+      scale_x_log10(labels = percent_format()) +
+      scale_y_log10(labels = percent_format()) +
+      scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+      theme(legend.position="none")
+```
+
+
+```{r, warning=FALSE, message=FALSE,echo=FALSE}
+temp_country <- bag_of_words_country %>%
+      count(stage, word) %>%
+      group_by(stage) %>%
+      mutate(proportion = n / sum(n)) %>% 
+      select(-n) %>% 
+      spread(stage, proportion)
+g1<-ggplot(temp_country, 
+             aes_string(x = colnames(temp_country)[2], y = colnames(temp_country)[3]),
+             color = abs(colnames(temp_country)[3] - colnames(temp_country)[2])) +
+      geom_abline(color = "gray40", lty = 2) +
+      geom_jitter(alpha = 0.1, size = 1, width = 0.3, height = 0.3) +
+      geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+      labs(title="Words Proportion for Country Music before/after 2010")+
+      scale_x_log10(labels = percent_format()) +
+      scale_y_log10(labels = percent_format()) +
+      scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+      theme(legend.position="none")
+
+temp_hiphop <- bag_of_words_hiphop %>%
+      count(stage, word) %>%
+      group_by(stage) %>%
+      mutate(proportion = n / sum(n)) %>% 
+      select(-n) %>% 
+      spread(stage, proportion)
+g2<-ggplot(temp_hiphop, 
+             aes_string(x = colnames(temp_hiphop)[2], y = colnames(temp_hiphop)[3]),
+             color = abs(colnames(temp_hiphop)[3] - colnames(temp_hiphop)[2])) +
+      geom_abline(color = "gray40", lty = 2) +
+      geom_jitter(alpha = 0.1, size = 1, width = 0.3, height = 0.3) +
+      geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+      labs(title="Words Proportion for Hip-Hop Music before/after 2010")+
+      scale_x_log10(labels = percent_format()) +
+      scale_y_log10(labels = percent_format()) +
+      scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+      theme(legend.position="none")
+
+temp_jazz <- bag_of_words_jazz %>%
+      count(stage, word) %>%
+      group_by(stage) %>%
+      mutate(proportion = n / sum(n)) %>% 
+      select(-n) %>% 
+      spread(stage, proportion)
+g3<-ggplot(temp_jazz, 
+             aes_string(x = colnames(temp_jazz)[2], y = colnames(temp_jazz)[3]),
+             color = abs(colnames(temp_jazz)[3] - colnames(temp_jazz)[2])) +
+      geom_abline(color = "gray40", lty = 2) +
+      geom_jitter(alpha = 0.1, size = 1, width = 0.3, height = 0.3) +
+      geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+      labs(title="Words Proportion for Jazz Music before/after 2010")+
+      scale_x_log10(labels = percent_format()) +
+      scale_y_log10(labels = percent_format()) +
+      scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+      theme(legend.position="none")
+
+temp_mental <- bag_of_words_mental %>%
+      count(stage, word) %>%
+      group_by(stage) %>%
+      mutate(proportion = n / sum(n)) %>% 
+      select(-n) %>% 
+      spread(stage, proportion)
+g4<-ggplot(temp_mental, 
+             aes_string(x = colnames(temp_mental)[2], y = colnames(temp_mental)[3]),
+             color = abs(colnames(temp_mental)[3] - colnames(temp_mental)[2])) +
+      geom_abline(color = "gray40", lty = 2) +
+      geom_jitter(alpha = 0.1, size = 1, width = 0.3, height = 0.3) +
+      geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+      labs(title="Words Proportion for Mental Music before/after 2010")+
+      scale_x_log10(labels = percent_format()) +
+      scale_y_log10(labels = percent_format()) +
+      scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+      theme(legend.position="none")
+
+temp_pop <- bag_of_words_pop %>%
+      count(stage, word) %>%
+      group_by(stage) %>%
+      mutate(proportion = n / sum(n)) %>% 
+      select(-n) %>% 
+      spread(stage, proportion)
+g5<-ggplot(temp_pop, 
+             aes_string(x = colnames(temp_pop)[2], y = colnames(temp_pop)[3]),
+             color = abs(colnames(temp_pop)[3] - colnames(temp_pop)[2])) +
+      geom_abline(color = "gray40", lty = 2) +
+      geom_jitter(alpha = 0.1, size = 1, width = 0.3, height = 0.3) +
+      geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+      labs(title="Words Proportion for Pop Music before/after 2010")+
+      scale_x_log10(labels = percent_format()) +
+      scale_y_log10(labels = percent_format()) +
+      scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+      theme(legend.position="none")
+
+temp_rock <- bag_of_words_rock %>%
+      count(stage, word) %>%
+      group_by(stage) %>%
+      mutate(proportion = n / sum(n)) %>% 
+      select(-n) %>% 
+      spread(stage, proportion)
+g6<-ggplot(temp_rock, 
+             aes_string(x = colnames(temp_rock)[2], y = colnames(temp_rock)[3]),
+             color = abs(colnames(temp_rock)[3] - colnames(temp_rock)[2])) +
+      geom_abline(color = "gray40", lty = 2) +
+      geom_jitter(alpha = 0.1, size = 1, width = 0.3, height = 0.3) +
+      geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+      labs(title="Words Proportion for Rock Music before/after 2010")+
+      scale_x_log10(labels = percent_format()) +
+      scale_y_log10(labels = percent_format()) +
+      scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+      theme(legend.position="none")
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(3,2)))
+vplayout <- function(x,y){viewport(layout.pos.row = x, layout.pos.col = y)}  
+print(g1, vp = vplayout(1,1))
+print(g2, vp = vplayout(1,2))
+print(g3, vp = vplayout(2,1))
+print(g4, vp = vplayout(2,2))
+print(g5, vp = vplayout(3,1))
+print(g6, vp = vplayout(3,2))
+```
+
+From the plots and cloud above, the word like "love", "baby", "girl","youre" are always used in lyrics all the time, words like "cowboy","bubba","artifacts" which used to frequently appear, is rarely shown any more. And words like "camouflage","troll","afterparty","pirate" starts to shown in lyrics in recent years.
+
+```{r,warning=FALSE, message=FALSE,echo=FALSE}
+p1 <- word_count_country[1:8,] %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      labs(title = "Word Frequency in Country Music")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+p2 <- word_count_hiphop[1:8,] %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      labs(title = "Word Frequency in Hip-Hop Music")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+p3 <- word_count_jazz[1:8,] %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      labs(title = "Word Frequency in Jazz Music")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+p4 <- word_count_mental[1:8,] %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      labs(title = "Word Frequency in Mental Music")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+p5 <- word_count_pop[1:8,] %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      labs(title = "Word Frequency in Pop Music")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+p6 <- word_count_rock[1:8,] %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      labs(title = "Word Frequency in Rock Music")+
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(3,2))) 
+vplayout <- function(x,y){viewport(layout.pos.row = x, layout.pos.col = y)}  
+print(p1, vp = vplayout(1,1))
+print(p2, vp = vplayout(1,2))
+print(p3, vp = vplayout(2,1))
+print(p4, vp = vplayout(2,2))
+print(p5, vp = vplayout(3,1))
+print(p6, vp = vplayout(3,2))
+``` 
+```{r,warning=FALSE, message=FALSE,echo=FALSE}
+lyrics_love <- lyrics[grepl("love",lyrics$stemmedwords),]
+nrow(lyrics)
+nrow(lyrics_love)
+```
+I also list the top 8 frequently used word in every genres, which shows the similar results. among all the 122,376 lines of lyrics, 51182 of which have "love" included. The word "love" show the core emotion from old times to today in every genres, except the mental music which is presented below. Mental music tend to focus on the singers' inner world rather than the external emotional connections.
+```{r,message=FALSE,warning=FALSE,echo=FALSE}
+c4<-wordcloud(word_count_mental$word,word_count_mental$n ,
+          scale=c(3,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Reds"))
+```
+However, love in different genres of music can be different from each others. I compare the word often used in the subset of data which includes "love","heart","baby","youre"
+```{r,warning=FALSE, message=FALSE,echo=FALSE}
+lyrics_jazzlove <- lyrics_jazz[grepl("love",lyrics_jazz$stemmedwords)|grepl("heart",lyrics_jazz$stemmedwords)|grepl("baby",lyrics_jazz$stemmedwords)|grepl("youre",lyrics_jazz$stemmedwords),]
+
+bag_of_words_jazzlove <-  lyrics_jazzlove %>%
+  unnest_tokens(word, stemmedwords)
+
+word_count_jazzlove <- bag_of_words_jazzlove %>%
+  count(word, sort = TRUE)
+
+word_count_jazzlove<- word_count_jazzlove[-c(which(word_count_jazzlove$word =="love"),which(word_count_jazzlove$word =="heart"),which(word_count_jazzlove$word =="baby"),which(word_count_jazzlove$word =="youre")),]
+
+t1<-word_count_jazzlove[1:10,] %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+lyrics_hiphoplove <- lyrics_hiphop[grepl("love",lyrics_hiphop$stemmedwords)|grepl("heart",lyrics_hiphop$stemmedwords)|grepl("baby",lyrics_hiphop$stemmedwords)|grepl("youre",lyrics_hiphop$stemmedwords),]
+
+bag_of_words_hiphoplove <-  lyrics_hiphoplove %>%
+  unnest_tokens(word, stemmedwords)
+
+word_count_hiphoplove <- bag_of_words_hiphoplove %>%
+  count(word, sort = TRUE)
+
+word_count_hiphoplove<- word_count_hiphoplove[-c(which(word_count_hiphoplove$word=="love"),which(word_count_hiphoplove$word =="heart"),which(word_count_hiphoplove$word =="baby"),which(word_count_hiphoplove$word =="youre")),]
+
+t2<-word_count_hiphoplove[1:10,] %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n)) +
+      geom_col() +
+      xlab(NULL) +
+      ylab("Word Frequency")+
+      coord_flip()
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(1,2))) 
+vplayout <- function(x,y){viewport(layout.pos.row = x, layout.pos.col = y)}  
+print(t1, vp = vplayout(1,1))
+print(t2, vp = vplayout(1,2))
+
+```
+```{r,warning=FALSE, message=FALSE,echo=FALSE}
+
+wordcloud(word_count_jazzlove$word,word_count_jazzlove$n ,
+          scale=c(3,0.1),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Accent"))
+
+wordcloud(word_count_hiphoplove$word,word_count_hiphoplove$n ,
+          scale=c(3,0.1),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Accent"))
+```
+From the results above, I can see jazz and hiphop music have clear difference in word choose. To express love, Jazz musicians prefer more elegant vocabulary like "dream","blue","night", while rappers prefers more colloquial and unrefined words.
+
+### Sentiment Analysis
+I would also like to examine which genre is the most positive or negative overall?
+```{r,warning=FALSE, message=FALSE,echo=FALSE}
+lyrics_words <- lyrics %>%
+  unnest_tokens(word, stemmedwords)
+
+lyrics_words %>%
+  count(word, sort = TRUE)
+
+words_by_genre <- lyrics_words %>%
+  count(genre, word, sort = TRUE) %>%
+  ungroup()
+
+#get_sentiments("afinn")
+genre_sentiments <- words_by_genre %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(genre) %>%
+  summarize(value = sum(value * n) / sum(n))
+
+genre_sentiments %>%
+  ggplot(aes(genre, value, fill = value > 0)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  ylab("Average sentiment value")
+```
+From the plot above, we can see the lyrics in Jazz music deliver the most positive values, and Hip-Hop music contains the most negative messages. These are corresponding to our findings in the word choice to express love.
+
+
+```{r,warning=FALSE, message=FALSE,echo=FALSE}
+contributions_jazz <- bag_of_words_jazz %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(word) %>%
+  summarize(occurences = n(),
+            contribution = sum(value))
+
+s1<-contributions_jazz %>%
+  top_n(10, abs(contribution)) %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  labs(title = "Sentiment analysis in Jazz Music")+
+  geom_col(show.legend = FALSE) +
+  coord_flip()
+
+contributions_randb <- bag_of_words_randb %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(word) %>%
+  summarize(occurences = n(),
+            contribution = sum(value))
+
+s2<- contributions_randb %>%
+  top_n(10, abs(contribution)) %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  labs(title = "Sentiment analysis in R&B Music")+
+  geom_col(show.legend = FALSE) +
+  coord_flip()
+
+contributions_pop <- bag_of_words_pop %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(word) %>%
+  summarize(occurences = n(),
+            contribution = sum(value))
+
+s3<-contributions_pop %>%
+  top_n(10, abs(contribution)) %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  labs(title = "Sentiment analysis in Pop Music")+
+  geom_col(show.legend = FALSE) +
+  coord_flip()
+
+
+contributions_hiphop <- bag_of_words_hiphop %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(word) %>%
+  summarize(occurences = n(),
+            contribution = sum(value))
+
+s4<-contributions_hiphop %>%
+  top_n(10, abs(contribution)) %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  labs(title = "Sentiment analysis in Hiphop Music")+
+  geom_col(show.legend = FALSE) +
+  coord_flip()
+
+contributions_mental <- bag_of_words_mental %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(word) %>%
+  summarize(occurences = n(),
+            contribution = sum(value))
+
+s5<-contributions_mental %>%
+  top_n(10, abs(contribution)) %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  labs(title = "Sentiment analysis in Mental Music")+
+  geom_col(show.legend = FALSE) +
+  coord_flip()
+
+contributions_rock <- bag_of_words_rock %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(word) %>%
+  summarize(occurences = n(),
+            contribution = sum(value))
+
+s6<-contributions_rock %>%
+  top_n(10, abs(contribution)) %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  labs(title = "Sentiment analysis in Rock Music")+
+  geom_col(show.legend = FALSE) +
+  coord_flip()
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(3,2))) 
+vplayout <- function(x,y){viewport(layout.pos.row = x, layout.pos.col = y)}  
+print(s1, vp = vplayout(1,1))
+print(s2, vp = vplayout(2,1))
+print(s3, vp = vplayout(3,1))
+print(s4, vp = vplayout(1,2))
+print(s5, vp = vplayout(2,2))
+print(s6, vp = vplayout(3,2))
+```
+I take 6 different music genres, which are strongly affected by emotion, as examples, and look deeper to analyze which words contributed most to the positive and negative sentiment values.
+it turns out to be , jazz, R&B, and Pop music on the left contains frequent usage of "love","happy","true","care", which are quite reasonable to be positive drivers. however, Hip-Hop, Mental, and Rock music mentions a lot about"ill","shit","die","hell" as the the strongest contributors to be negative lyrics.
+
+Moreover, artists, as brilliant storytellers, also have fixed lyrics style, therefore, I list top 10 artists with the most negative songs.
+```{r,warning=FALSE, message=FALSE,echo=FALSE}
+artist_sentiments <- lyrics_words %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(genre,artist) %>%
+  summarize(sentiment = mean(value),
+            words = n()) %>%
+  ungroup()
+
+artist_sentiments %>%
+  arrange(desc(sentiment)) %>%
+  top_n(10)
+```
+
+## Conclusions
+1. Song lyrics changes with time, but "love" is the core emotion from past to present
+
+2. Different genres of music have different patterns and word choice to express feelings.
+
+3. Jazz music delivers the most positive messages and Hip-hop music delivers the most negative.
+
+
+
+
